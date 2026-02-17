@@ -7,6 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+
 // -------------------- CORS --------------------
 const allowedOrigins = [
   "http://localhost:3000",
@@ -19,42 +20,49 @@ app.use(
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
       if (allowedOrigins.includes(origin)) return cb(null, true);
-      // school deployment: allow all
       return cb(null, true);
     },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
-
-// ================= DATABASE POOL (AIVEN READY) =================
+// ================= DATABASE POOL =================
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  port: process.env.DB_PORT,
+  port: Number(process.env.DB_PORT), // 🔥 force number
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
   ssl: {
-    rejectUnauthorized: false, // Required for Aiven
+    rejectUnauthorized: false, // required for Aiven
   },
 });
 
-// ================= TEST ROUTE =================
+// ================= GET ALL BOOKS =================
 app.get("/", async (req, res) => {
   try {
     const [rows] = await pool.execute("SELECT * FROM books");
     res.json(rows);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Database connection failed" });
+    console.error("GET ERROR:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
 // ================= CREATE BOOK =================
 app.post("/books", async (req, res) => {
   try {
-    const { title, author, genre, price, stock } = req.body;
+    let { title, author, genre, price, stock } = req.body;
+
+    if (!title || !author) {
+      return res.status(400).json({ error: "Title and author required" });
+    }
+
+    genre = genre || null;
+    price = price ? Number(price) : 0;
+    stock = stock ? Number(stock) : 0;
 
     const [result] = await pool.execute(
       "INSERT INTO books (title, author, genre, price, stock) VALUES (?, ?, ?, ?, ?)",
@@ -63,18 +71,18 @@ app.post("/books", async (req, res) => {
 
     res.json({
       message: "Book added successfully",
-      bookId: result.insertId,
+      id: result.insertId,
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Insert failed" });
+    console.error("POST ERROR:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
 // ================= DELETE BOOK =================
 app.delete("/books/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = Number(req.params.id);
 
     const [result] = await pool.execute(
       "DELETE FROM books WHERE id = ?",
@@ -82,21 +90,29 @@ app.delete("/books/:id", async (req, res) => {
     );
 
     if (result.affectedRows === 0) {
-      return res.json({ message: "Book not found" });
+      return res.status(404).json({ message: "Book not found" });
     }
 
     res.json({ message: "Book deleted successfully" });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Delete failed" });
+    console.error("DELETE ERROR:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
 // ================= UPDATE BOOK =================
 app.put("/books/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    const { title, author, genre, price, stock } = req.body;
+    const id = Number(req.params.id);
+    let { title, author, genre, price, stock } = req.body;
+
+    if (!title || !author) {
+      return res.status(400).json({ error: "Title and author required" });
+    }
+
+    genre = genre || null;
+    price = price ? Number(price) : 0;
+    stock = stock ? Number(stock) : 0;
 
     const [result] = await pool.execute(
       "UPDATE books SET title=?, author=?, genre=?, price=?, stock=? WHERE id=?",
@@ -104,13 +120,13 @@ app.put("/books/:id", async (req, res) => {
     );
 
     if (result.affectedRows === 0) {
-      return res.json({ message: "Book not found" });
+      return res.status(404).json({ message: "Book not found" });
     }
 
     res.json({ message: "Book updated successfully" });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Update failed" });
+    console.error("UPDATE ERROR:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
